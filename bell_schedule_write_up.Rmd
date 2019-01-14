@@ -1,0 +1,326 @@
+---
+title: "Bell Schedule Enrollment and Credit Impact"
+author: "Jason Whittle"
+date: "12/20/2018"
+header-includes:
+    - \usepackage{fancyhdr}
+    - \pagestyle{fancy}
+    - \rhead{\includegraphics[width=2cm,height=2cm]{logo.png}}
+    - \chead{Jason Whittle}
+    - \lhead{Bell Schedule Study}
+output:
+  pdf_document:
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+knitr::opts_chunk$set(warning = F)
+knitr::opts_chunk$set(message = F)
+```
+
+```{r}
+library(tidyverse); theme_set(theme_minimal())
+library(imputeTS)
+library(bsts)
+library(CausalImpact)
+library(lubridate)
+```
+
+<!-- Use ts_data.Rmd for specific program models and plots -->
+<!-- Use causalimpact_model_script.R to generate the data frame with all models -->
+
+# Summary
+
+This study assesses the impact of the college-wide change to the Bell Schedule that took place in Fall 2018. There was speculation that this shift in schedule (removing most Friday sections) resulted in lower enrollments in specific programs and thus Salt Lake Community College (SLCC) as a whole. The primary model used to evaluate these questions uses historical trends in both enrollment and attempted credits along with external Salt Lake County data to estimate what enrollments should have been for Fall 2018 and then compares the estimates to the actual values for Fall 2018. 
+
+- There does not appear to be a significant college wide impact on enrollment and credits-taken by program as a result of the bell schedule change. 88.5\% of programs were not significantly different from their predicted values.\footnote{85 of the 96 model used for analysis. }
+- There were several programs whose results were not considered due to the potential for confounding causal changes to the programs: Aviation Tech - Maintenance and Pilot, Biotechnology and Surgical Technology.\footnote{Both programs from the Aviation Tech program were excluded since the Professional Pilot program was cancelled and this might have had a substantial impact on the Aircraft Maintenance program. Biotechnology was excluded since the curriculum switch to a competency based education curriculum which potentially could have had a major impact on enrollments. Surgical Technology was excluded because it also experienced a large change as the high school program was switched from a concurrent enrollment to early enrollment program which is believed, by the adviser for this program, to be the cause of the drop in enrollments in Fall 2018.}
+- There were three programs with significantly lower than trend headcount in Fall 2018: Social Work, Family and Human Studies and Fashion. There were 4 programs with significantly higher enrollment than trend for Fall 2018: Architectural Technology, Communication, Criminal Justice and Nursing.
+- There were three programs that had significantly lower than trend credits attempted: Health/Lifetime Activities program (HLAC), Family and Human Studies and Dental Hygiene. There was one program that had significantly higher than trend credits attempted: Communication.
+- The Communication program had higher than trend enrollment and credits attempted and the Family and Human Studies program had lower then trend enrollments and credits attempted in Fall 2018. 
+
+*Impacts from the change to the Bell Schedule were not enough in general to be 'picked' up with the modeling done for this report however this doesn't mean that there were not small impacts from this college wide change*.
+
+# Data
+
+The primary data used in modeling comes from SLCC's data warehouse. Both attempted credits and headcount by program were modeled using statistical methods that could control for population trends and unemployment. Salt Lake County unemployment data was pulled from the Federal Reserve's FRED website. College aged (15-29) population for white and Hispanic/Latino/Latina (HLL) in Salt Lake County were pulled from EMSI (a data company IR contracts with) which is modeled based on primarily census estimates. 
+
+The student data used to estimate the per-program trend included both fall and spring semesters from Fall 2009 to Fall 2018.\footnote{Summer semesters were excluded to help the seasonal effect be more accurate.} There were two time series used; the sum of all credits attempted and sum of headcount by program. 
+
+# Estimating a moving target
+
+There are several challenges with trying to determine the impact of SLCC's bell schedule change with only one semester of post-treatment data. To start, all of SLCC transitioned to the bell schedule at the same time preventing a 'natural experiment' where causality and effect could be estimated based on control programs that did not change their schedule. 
+
+Second, enrollments have been trending down for nearly 10 years now as the economy recovers from the 2008 recession and Salt Lake County demographics shifts. Questions such as "did the change cause our lower enrollment numbers this Fall?" are really asking "is there a meaningful change in the rate of decline in enrollment in Fall 2018?" This question is hard because we would already expect enrollments to be down in Fall 2018: the demographic trends of Salt Lake County didn't suddenly reverse, the labor market hasn't changed (remaining rather strong) and it is unlikely anything SLCC was doing in Fall 2017 suddenly became much more effective. This trend can be seen in the figure below.
+
+### SLCC Fall Third Week Enrollments
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('thridweek.png')
+```
+
+However this figure does not address this question on a program level. From initial research on this question we know that 59 programs had lower FTE/enrollment than in Fall 2017 and 28 programs had increase FTE compared to Fall 2017. Looking at the change at a program level introduces additional complications. By disaggregating the analysis to the smaller program level units, *confidence intervals expand making statistical tests less sensitive to picking up deviations in rates of change*. 
+
+# BSTS and CausalImpact
+
+The modeling method used to attempt to address some of the difficulties with this question was Bayesian Structural Time Series (BSTS). BSTS was used for several reasons: first, it is a formal time series model that can control for trends, second, it allows for the inclusion of external control variables and finally, the output is more easily summarized than most other methods considered. A general BSTS model was built to control for Salt Lake County demographics, unemployment, seasonality (between Fall and Spring semesters) and the general enrollment trend by program. This general BSTS model was then applied to all programs with a time series of 18 Fall and Spring semesters (50)\footnote{Some programs have changed, were created or eliminated which limited their enrollment history to less than this amount of time. Estimating a time series with fewer data points would lead to unreliable estimates.} \footnote{The 4 programs that were excluded from conclusive analysis that were mentioned in the summary (Both Aviation Tech programs, Biotechnology and Surgical Technology) were included in the modeling process and their results will be presented in the tables at the report.} and then the R package CausalImpact was used to assess if the Fall 2018 enrollment numbers and credit hours were significantly different from previous terms. 
+
+CausalImpact will predict a specified number of time periods into the future (1 semester for this study) based on the external control variables (demographics and unemployment in this case), the trend of the target variable (i.e. headcount) and then compare the predicted value to the actual value. CausalImpact also estimates a 95% confidence interval for the prediction which creates an easy to interpret output. BSTS models the time series and CausalImpact predicts forward and assesses if impacts are statistically significant.
+
+Below are two examples of the method used to evaluate the Bell Schedule and a full walk through with the Fashion Institute program of the BSTS to CausalImpact modeling process. The two examples are meant to illustrate how this modeling worked and make sense of how programs were found to be significantly different from their predicted trend. The Full walk through is meant to display how the external controls, semester fluctuations and trends were handled. These examples are from the minority of the 96 models considered in that they have actual values that lie outside the predicted interval. 
+
+\newpage
+
+### Communication headcount
+
+As an example, the figure below highlights the output of both the BSTS model and the CausalImpact analysis for the headcount change in the Communication program (COMM). In the figure below the values on the y-axis represent the semester to semester rate of change. The solid black line represents the actual Headcount semester to semester change. The blue dotted line that mirrors the black line for most of the time series is the BSTS model which takes into account the black line as well as the changing demographics of Salt Lake County and changes in the unemployment rate. The shaded area around the model line represents the 95% confidence interval. And finally, the vertical grey dashed line represents Spring 2018 (the last period the model is trained on). 
+
+For Fall 2018\footnote{Everything to the right of the vertical dashed line.} the model uses the Fall 2018 demographic data, the Fall 2018 unemployment data and the previous trend to try and predict Fall 2018 headcount in COMM. In the case below COMM's actual headcount surged well beyond what the model predicted, this can be seen by the fact that the solid black headcount line lies beyond the blue shaded confidence interval on the far right of the time series. 
+
+```{r}
+knitr::include_graphics(
+  'COMM_HC.png'
+)
+```
+\newpage
+
+### HLAC Attempted Credits
+
+The figure below displays the output of the Health/Lifetime Activities program (HLAC) and can be interpreted in exactly the same manner as the previous figure but this figure is modeling credits attempted rather than headcount. For HLAC actual attempted credits was lower than the predicted 95% confidence interval. The confidence interval is also larger for HLAC reflecting that the BSTS model has more uncertainty about HLAC Attempted Credit values than the same model did for COMM headcount values. 
+
+```{r}
+knitr::include_graphics('HLAC_CA.png')
+```
+
+### Full BSTS Walkthrough: Fashion Institute Program
+
+This section will provide a full BSTS model walk through for the Fashion Institute (FI) program. In the figure below the model for the FI program is broken down. The trend (credits attempted in this case) is on the left, the middle plot displays the BSTS model of the semester to semester fluctuation for the FI program and finally the plot on the right represents the dynamic regression component. 
+
+The dynamic regression component is how the BSTS model controls for the Salt Lake County labor market along with college aged demographics. The dynamic regression component shows how the external factors are impacting credits attempted for the FI program. At the beginning of the time series the external factors were a positive on term to term growth rate but have been a drag on credits attempted since around 2011. 
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('fi_comp.png')
+```
+
+The figure below further breaks down the dynamic regression component. The three plots are distributions for each of the three external control variables (white population, unemployment rate and HLL population respectively). The dark band in each plot represents the effect of this regression element. For instance the middle plot show the impact of Salt Lake County's labor market and it can be seen to have a larger effect on FI credits attempted than either of the demographic components. These regression values will be different for all 100 models run, but a common theme seems to be the labor market being a more powerful influence on both credits attempted and headcounts than the white and HLL population dynamics for most programs. 
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('fi_dynam.png')
+```
+
+\newpage
+
+This was a breakdown of the output of the BSTS model that was used by CausalImpact to generate the plot below. For credits attempted for the FI program the drop in actual credits attempted (the black line) was too small to lie outside the confidence interval for this model. The credits attempted model is much more uncertain than the FI program's model for headcount where the actual is significantly different than the predicted range.
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('fi_ac.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('fi_hc.png')
+```
+
+
+\newpage
+
+## Programs with Significantly Different Headcounts and Attempted Credits
+
+Below are tables that provide a list of all programs with actual values that fell outside of the two different models' expected confidence interval.\footnote{Results for all models are displayed in the appendix.} Most of these 'out of bounds' values just missed the confidence intervals. The main point of these tables is to illustrate where the actual values landed compared to the estimated intervals.
+
+For headcount there are three programs with significantly lower than predicted values and four programs with significantly higher than predicted values when excluding the four programs with known changes not related to the Bell Schedule (both Aviation Tech programs, Biotechnology and Surgical Technology). All of the significantly lower programs that are of interest were between 1.1% and 1.8% lower than their respective predicted confidence intervals. The significantly higher programs of interests were between 0.7% and 5.3% higher than their respective predicted confidence intervals.
+
+```{r}
+model_outputs_df <- read_csv("model_outputs_df.csv")
+
+model_outputs_df %>% 
+  filter(Headcount < HC_lower) %>% 
+  dplyr::select(Program, Headcount, HC_lower, HC_upper) %>% 
+  knitr::kable(col.names = c("Program", "Headcount Change", "Lower 5%", "Upper 5%"),
+               caption = "This table provides a list of all the **lower** than predicted 'out of bounds' values for Fall 2018 Headcount")
+```
+
+```{r}
+model_outputs_df %>% 
+  filter(Headcount > HC_upper) %>% 
+  dplyr::select(Program, Headcount, HC_lower, HC_upper) %>% 
+  knitr::kable(col.names = c("Program", "Headcount Change", "Lower 5%", "Upper 5%"),
+               caption = "This table provides a list of all the **higher** than predicted 'out of bounds' values for Fall 2018 Headcount")
+```
+
+
+\newpage
+
+For credits attempted there are three programs with significantly lower than predicted values and one program with significantly higher than predicted values when excluding the four programs with known changes not related to the Bell Schedule (both Aviation Tech programs, Biotechnology and Surgical Technology). All of the significantly lower programs that are of interest were either 0.1% (two programs) or 5.3% lower than their respective predicted confidence intervals. The significantly higher program of interest (COMM) was 4.7% higher than its respective predicted confidence interval.
+
+```{r}
+model_outputs_df %>% 
+  filter(Credits_Taken < CT_lower) %>%
+  dplyr::select(Program, Credits_Taken, CT_lower, CT_upper) %>%
+  knitr::kable(col.names = c("Program", "Credits Taken Change", "Lower 5%", "Upper 5%"),
+               caption = "This table provides a list of all the **lower** than predicted 'out of bounds' values for Fall 2018 Attempted Credits")
+```
+
+```{r}
+model_outputs_df %>% 
+  filter(Credits_Taken > CT_upper) %>%
+  dplyr::select(Program, Credits_Taken, CT_lower, CT_upper) %>%
+  knitr::kable(col.names = c("Program", "Credits Taken Change", "Lower 5%", "Upper 5%"),
+               caption = "This table provides a list of all the **higher** than predicted 'out of bounds' values for Fall 2018 Attempted Credits")
+```
+
+# Additional Studies Performed and Considered
+
+There were many different avenues explored for answering questions about the change to the Bell Schedule. None of them are 'good' study design, meaning they all have substantial short comings. The BSTS/CausalImpact/time series approach is in my opinion the best since it explicitly handles the biggest problem (the downward trend in enrollments). Below will document *some* additional metrics looked at to assess what the impact of the Bell Schedule had on Fall 2018.
+
+## Fill Rates
+
+We can look for evidence of program level impacts by looking at fill rates. There were 26 programs that had increased fill rates in Fall 2018 compared to Fall 2017, 2 with no change and 36 (56%) with lower fill rates. Fill rates are subject to two problems; trend and endogeneity. 
+
+Just like headcount and credits attempted we would expect there to be lower fill rates in an environment of declining institution enrollments. There is also the problem that seats available is a choice SLCC planners are making based on their best judgement of the upcoming semester. If program planners are making proper judgement there should not be an obvious pattern the percent change in fill rates (just random fluctuation around zero). In essence the endogeneity problem means we are not only seeing what students did but also what SLCC planners did (not very clean or informative).  
+
+Below is a table with the percent difference in fill rates between Fall 2018 and Fall 2017. More rigorous work could be done on fill rate but it would likely not lead anywhere and was only checked to make sure there were not obvious results opposing the BSTS modeling (I don't see an obvious discrepancy). 
+
+```{r}
+fill_rate <- read.csv("fill_rate.csv")
+```
+
+```{r}
+# Fall 2017 to Fall 2018 change
+fill_rate %>% filter(TERM_CODE == 201840 | TERM_CODE == 201740) %>%
+  group_by(DEPARTMENT, TERM_CODE) %>%
+  summarise(rate = TOTAL_ENROLLMENTS/CAPACITY) %>%
+  ungroup() %>%
+  group_by(DEPARTMENT) %>%
+  summarise(diff = round(sum(rate[TERM_CODE == 201840] - rate[TERM_CODE == 201740]), 4)*100) %>%
+  arrange(desc(diff)) %>% 
+  knitr::kable(col.names = c("Program", "% Change in Fill Rate"),
+               caption = "Differnce in Program Fill Rate: Fall 2018 to Fall 2017") 
+```
+
+
+## Cost Analysis
+
+There are not signs of change in the budget yet. The current budget trails the current semester and is constructed for a whole year (not semester). The next SLCC budget should provide us much more useful insights on the impact of the Bell Schedule from a cost perspective. One theory on the impact of the Bell Schedule was that it might increase the efficiency of instruction costs at SLCC. More time will be needed to assess if this is true or not. There would also be the need to obtain more detailed data than what is publicly available on SLCC's website. Numbers obtained from publicly available data sources show that instructional costs as a share of the total budget at SLCC have been slowly decline for the last few years.\footnote{"Fixed costs" refers to the remainder of the budget that is not explicitly instructional. This is obviously an over simplification but it is interesting to start to get a sense of the values and relative magnitudes of budget items.}
+
+- 2018-19: total budget = 163,117,000 | instruction = 46.2% or 75,360,054 | "fixed costs" = 87,756,946
+- 2017-18: total budget = 157,258,800 | instruction = 47.6% or 74,855,189 | "fixed costs" = 82,403,611
+- 2016-17: total budget = 155,428,400 | instruction = 48.7% or 75,698,096 | "fixed costs" = 79,730,304
+
+Costs are tricky since they are a result of two elements, SLCC students' behavior (enrolling or not, credit load) and SLCC planners decisions (low enrolled course policies, section offerings). Costs are dynamic, lower instructional costs could be associated with more efficient scheduling or lower instructional need as enrollment declines. Fixed costs by definition remain the same regardless of Friday sections and thus are influenced by how many enrollments they are spread across. Analysis of costs at SLCC is a great idea but will require careful develop to determine the source of a cost change. 
+
+## Student level MLM model
+
+A sophisticated Multilevel regression model (MLM) was planned but not carried out since there would have been no clear way to assess the performance of the model using something like CausalImpact (CausalImpact only works with time series models). The MLM model would have attempted to create a predictive model of a SLCC student based on the small but contemporary semesters of Fall 2016 and Fall 2017. The models would have estimated the Fall credit load of a student and then been feed Fall 2018 values (such as demographics, prior academics and other controls) to predict Fall 2018 credits attempted. The predicted values from this student model would have been compared to the actual values of Fall 2018 students to see if the student behavior of Fall 2016 and 2017 changed in Fall 2018. 
+
+This was abandoned for several reasons. First, we are not that good at predicting individual student behavior in general. This lack of precision in predictive analytics is due to many reasons such as a lack of micro and frequent student data, lack of historical academic controls (being an open institution), lack of an ability to measure noncognitive variables (such as 'stick-to-itness') and massive external and unclear influences on our students (like the local job market). Second, this model would not have been able to control for the declining trend in SLCC enrollments effectively (it is explicitly not a time series model). Including controls for year is completely multicolinear with the change to the Bell Schedule. Third, this modeling method would not catch those students who just didn't enroll due to the change in schedule, it could only answer the question about the Bell Schedule's impact on credits taken. And finally, there would be large uncertainty that would be hard to concisely understand and summarize (like the BSTS confidence intervals).
+
+\newpage
+
+# Appendix
+
+## Out of Bounds Plots
+
+### Communication
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('comm_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('comm_ac.png')
+```
+
+\newpage
+
+### Family and Human Studies
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('fhs_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('fhs_ac.png')
+```
+
+\newpage
+
+### Social Work
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('sw_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('sw_ac.png')
+```
+
+\newpage
+
+### Criminal Justice
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('cj_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('cj_ac.png')
+```
+
+\newpage
+
+### Nursing
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('n_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('n_ac.png')
+```
+
+\newpage
+
+### Architectural Technology
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('at_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('at_ac.png')
+```
+
+\newpage
+
+### Dental Hygiene
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('dh_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('DH_PLOT.png')
+```
+
+\newpage
+
+### Health/Lifetime Activities
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('HLAC_hc.png')
+```
+
+```{r, out.width='75%', out.height='75%'}
+knitr::include_graphics('HLAC_CA.png')
+```
+
+### All model results
+
+Results for all 50 programs for both Credits Attempted and Headcount BSTS models. **The results that were significantly different than their respective predicted confidence intervals were presented in tables 1-4.**
+
+```{r}
+model_outputs_df %>% 
+  dplyr::select(Program, Headcount, HC_lower, HC_upper, Credits_Taken, CT_lower, CT_upper) %>%
+  knitr::kable(col.names = c("Program", "Headcount", "Lower 5%", "Upper 5%", "Credits", "Lower 5%", "Upper 5%"))
+```
+
